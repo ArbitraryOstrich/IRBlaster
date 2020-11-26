@@ -138,14 +138,14 @@ void callback(char* topic, byte* payload, unsigned int length) {
   doc["t"] = epochDate;
   if (strcmp((char *) topic_c_string, COMMANDTOPIC) == 0 ) {
     // Write over doc["n"] later if we actually do something w/ the command.
-    doc["n"] = "Recieved Command but didn't understand";
+    doc["n"] = "Received Command but didn't understand";
 
     char buffer[10];
     strncpy(buffer, payload_c_string, 7);
     buffer[7] = '\0';   
     Serial.println(payload_c_string);
     if (strcmp((char *) buffer, "channel") == 0 ) {
-      Serial.println("Recived channel change command");
+      Serial.println("Received channel change command");
       char chan_buffer[5];
       chan_buffer[1] = payload_c_string[8]; 
       chan_buffer[2] = payload_c_string[9]; 
