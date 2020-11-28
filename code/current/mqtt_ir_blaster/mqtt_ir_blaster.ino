@@ -14,9 +14,10 @@ const char* mqttUsername = "***REMOVED***";
 const char* mqttPassword = "***REMOVED***";
 const char* mqttClientName = "***REMOVED***";
 
-const char* DATATOPIC = "***REMOVED***/dht22";
-const char* COMMANDTOPIC = "***REMOVED***/command";
-const char* SERVICETOPIC = "***REMOVED***/response";
+const char* mqtt_data_topic = "***REMOVED***/dht22";
+const char* mqtt_command_topic = "***REMOVED***/command";
+const char* mqtt_response_topic = "***REMOVED***/response";
+const char* mqtt_log_topic = "***REMOVED***/log";
 const char *willTopic = "***REMOVED***/status";
 const char *willMessage = "offline";
 int willQoS = 1;
@@ -71,6 +72,24 @@ String formattedDate;
 String dayStamp;
 String timeStamp;
 
+void mqttLog(const char* str) {
+  if (mqtt_client.connected()){
+    DynamicJsonDocument doc(256);
+    timeClient.update();
+    int mqtt_log_time = timeClient.getEpochTime();
+    doc["time"] = mqtt_log_time;
+    doc["msg"] = str;
+    char buffer[256];
+    size_t n = serializeJson(doc, buffer);
+    mqtt_client.publish(mqtt_log_topic, buffer, n);
+    // mqtt_client.publish(mqtt_log_topic, str);
+  }else{
+    // print to serial
+    // also figure out a way to store. 
+  }
+}
+
+
 void mqttConnect() {
   while (!mqtt_client.connected()) {
     Serial.print("Attempting MQTT connection...");
@@ -79,21 +98,14 @@ void mqttConnect() {
       Serial.println(willTopic);
       mqtt_client.publish(willTopic, "online");
       // empty out watever command is on the mqtt channel
-      mqtt_client.publish(COMMANDTOPIC, "");
+      mqtt_client.publish(mqtt_command_topic, "");
       // Subcribe here. 
-      mqtt_client.subscribe(COMMANDTOPIC);
-      timeClient.update();
-      int epochDate = timeClient.getEpochTime();
-      DynamicJsonDocument doc(1024);
-      doc["t"] = epochDate;
+      mqtt_client.subscribe(mqtt_command_topic);
       if (wasConnected){
-        doc["n"] = "Lost Connection to mqtt but now im back!";
+        mqttLog("Lost Connection to mqtt but now im back");
       }else{
-        doc["n"] = "First Connection after boot";
+        mqttLog("First Connection after boot");
       }
-      char buffer[1024];
-      size_t n = serializeJson(doc, buffer);
-      mqtt_client.publish(SERVICETOPIC, buffer, n);
       wasConnected = 1;
       } else {
       Serial.print("failed, rc = ");
@@ -136,7 +148,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   timeClient.update();
   int epochDate = timeClient.getEpochTime();
   doc["t"] = epochDate;
-  if (strcmp((char *) topic_c_string, COMMANDTOPIC) == 0 ) {
+  if (strcmp((char *) topic_c_string, mqtt_command_topic) == 0 ) {
     // Write over doc["n"] later if we actually do something w/ the command.
     doc["n"] = "Received Command but didn't understand";
 
@@ -232,8 +244,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
       irsend.sendSAMSUNG(0xE0E0E01F,32,2);
       doc["n"] = "sam_vol_up";
     }
-
-
     if (strcmp((char *) payload_c_string, "ccast_to_sat") == 0 ) {
       irsend.sendSAMSUNG(0xE0E0807F,32,2);
       delay(1000);
@@ -342,7 +352,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   // Prep json
   char buffer[1024];
   size_t n = serializeJson(doc, buffer);
-  mqtt_client.publish(SERVICETOPIC, buffer, n);
+  mqtt_client.publish(mqtt_response_topic, buffer, n);
   Serial.println();
   Serial.println();
 }
@@ -383,7 +393,7 @@ void loop() {
   doc["t"] = epochDate;
   char buffer[1024];
   size_t n = serializeJson(doc, buffer);
-  mqtt_client.publish(DATATOPIC, buffer, n);
+  mqtt_client.publish(mqtt_data_topic, buffer, n);
   mqtt_client.loop();
 
 }
