@@ -5,7 +5,19 @@
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
 #include <WiFi.h>
-#include "DHT.h"
+// #include "DHT.h"
+
+#include <Adafruit_BME280.h>
+float temp_storage = 0;
+float humid_storage = 0;
+
+#define SEALEVELPRESSURE_HPA (1013.25)
+Adafruit_BME280 bme;
+
+float temperature, humidity, pressure, altitude;
+
+bool bme_found;
+
 
 
 const char* mqttServerIp = "***REMOVED***";
@@ -24,11 +36,11 @@ int willQoS = 1;
 int willRetain = 1;
 bool wasConnected = 0;
 
-#define DHTPIN 15
-#define DHTTYPE DHT22
-DHT dht(DHTPIN, DHTTYPE);
-float dht_temp_storage = 0;
-float dht_humid_storage = 0;
+// #define DHTPIN 15
+// #define DHTTYPE DHT22
+// DHT dht(DHTPIN, DHTTYPE);
+// float dht_temp_storage = 0;
+// float dht_humid_storage = 0;
 
 
 char *ssid      = "***REMOVED***";               // Set you WiFi SSID
@@ -116,6 +128,14 @@ void mqttConnect() {
   }
 }
 
+void start_bme(){
+  Serial.println("Attempting to start BME");
+  bme.begin(0x76);   
+  bme_found = bme.begin(0x76); 
+}
+
+
+
 void setup() {
   Serial.begin(115200);
   delay(500);
@@ -134,9 +154,11 @@ void setup() {
   timeClient.begin();
   Serial.println("WiFi connected:");
   Serial.print(WiFi.localIP());
+  start_bme();
+  Serial.println("BME Started");
   Serial.println("/");
   irsend.begin();
-  dht.begin();
+  // dht.begin();
 	delay(500);
 }
 
@@ -364,29 +386,29 @@ void loop() {
    mqttConnect();
   }
   mqtt_client.loop();
+  float h = bme.readHumidity();
+  float t = bme.readTemperature();
+  float p = bme.readPressure() / 100.0F;
+
   DynamicJsonDocument doc(1024);
-  float h = dht.readHumidity();
-  float t = dht.readTemperature();
   if (isnan(h) || isnan(t)) {
-    // Use the stored value instead
-    // also set error bool
-    char dht_humidity[15];
-    char dht_temp[15];
-    doc["d_t"] = dht_temp_storage;
-    doc["d_h"] = dht_humid_storage;
-    doc["d_e"] = 1;
+    //Use the stored value instead
+    doc["d_t"] = temp_storage;
+    doc["d_h"] = humid_storage;
+    doc["error"] = 1;
 
   } else {
-    char dht_humidity[15];
-    char dht_temp[15];
-    sprintf(dht_temp, "%.1f", t);
-    sprintf(dht_humidity, "%.1f", h);
-    doc["d_t"] = dht_temp;
-    doc["d_h"] = dht_humidity;
-    doc["d_e"] = 0;
-
-    dht_temp_storage = t;
-    dht_humid_storage = h;
+    char humidity[15];
+    char temp[15];
+    char pressure[15];
+    sprintf(temp, "%.1f", t);
+    sprintf(humidity, "%.1f", h);
+    doc["d_t"] = temp;
+    doc["d_h"] = humidity;
+    doc["d_p"] = p;
+    doc["error"] = 0;
+    temp_storage = t;
+    humid_storage = h;
   }
   timeClient.update();
   int epochDate = timeClient.getEpochTime();
