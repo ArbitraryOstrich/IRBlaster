@@ -78,7 +78,9 @@ const uint16_t shaw_0[27] = {4978,1998,968,1036,960,1070,968,2988,970,1034,992,1
 
 WiFiUDP ntpUDP;
 // NTPClient timeClient(ntpUDP);
-NTPClient timeClient(ntpUDP, "192.168.138.1", 3600, 60000);
+
+NTPClient timeClient(ntpUDP, "***REMOVED***", 3600, 60000);
+// NTPClient timeClient(ntpUDP, "192.168.138.1", 3600, 60000);
 
 String formattedDate;
 String dayStamp;
@@ -190,52 +192,52 @@ void callback(char* topic, byte* payload, unsigned int length) {
         switch(chan_buffer[i]){
           case '1':
             irsend.sendRaw(shaw_1, 27, 38); 
-            delay(450);
+            delay(100);
             Serial.println(chan_buffer[i]);
             break;
           case '2':
             irsend.sendRaw(shaw_2, 27, 38); 
-            delay(450);
+            delay(100);
             Serial.println(chan_buffer[i]);
             break;
           case '3':
             irsend.sendRaw(shaw_3, 27, 38); 
-            delay(450);
+            delay(100);
             Serial.println(chan_buffer[i]);
             break;
           case '4':
             irsend.sendRaw(shaw_4, 27, 38); 
-            delay(450);
+            delay(100);
             Serial.println(chan_buffer[i]);
             break;
           case '5':
             irsend.sendRaw(shaw_5, 27, 38); 
-            delay(450);
+            delay(100);
             Serial.println(chan_buffer[i]);
             break;
           case '6':
             irsend.sendRaw(shaw_6, 27, 38); 
-            delay(450);
+            delay(100);
             Serial.println(chan_buffer[i]);
             break;
           case '7':
             irsend.sendRaw(shaw_7, 27, 38); 
-            delay(450);
+            delay(100);
             Serial.println(chan_buffer[i]);
             break;
           case '8':
             irsend.sendRaw(shaw_8, 27, 38); 
-            delay(450);
+            delay(100);
             Serial.println(chan_buffer[i]);
             break;
           case '9':
             irsend.sendRaw(shaw_9, 27, 38); 
-            delay(450);
+            delay(100);
             Serial.println(chan_buffer[i]);
             break;
           case '0':
             irsend.sendRaw(shaw_0, 27, 38); 
-            delay(450);
+            delay(100);
             Serial.println(chan_buffer[i]);
             break;
           default:
@@ -375,17 +377,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
   char buffer[1024];
   size_t n = serializeJson(doc, buffer);
   mqtt_client.publish(mqtt_response_topic, buffer, n);
-  Serial.println();
-  Serial.println();
 }
 
-
-void loop() {
-  delay(1000);
-  if (!mqtt_client.connected()) {
-   mqttConnect();
-  }
-  mqtt_client.loop();
+void read_BME(){
   float h = bme.readHumidity();
   float t = bme.readTemperature();
   float p = bme.readPressure() / 100.0F;
@@ -417,5 +411,53 @@ void loop() {
   size_t n = serializeJson(doc, buffer);
   mqtt_client.publish(mqtt_data_topic, buffer, n);
   mqtt_client.loop();
+}
+
+int loop_iter; 
+
+void loop() {
+  delay(50);
+  if (!mqtt_client.connected()) {
+   mqttConnect();
+  }
+  loop_iter = loop_iter + 1;
+  if (loop_iter == 20) {
+    read_BME();
+    loop_iter = 0;
+  }
+  mqtt_client.loop();
+
+
+  // float h = bme.readHumidity();
+  // float t = bme.readTemperature();
+  // float p = bme.readPressure() / 100.0F;
+
+  // DynamicJsonDocument doc(1024);
+  // if (isnan(h) || isnan(t)) {
+  //   //Use the stored value instead
+  //   doc["d_t"] = temp_storage;
+  //   doc["d_h"] = humid_storage;
+  //   doc["error"] = 1;
+
+  // } else {
+  //   char humidity[15];
+  //   char temp[15];
+  //   char pressure[15];
+  //   sprintf(temp, "%.1f", t);
+  //   sprintf(humidity, "%.1f", h);
+  //   doc["d_t"] = temp;
+  //   doc["d_h"] = humidity;
+  //   doc["d_p"] = p;
+  //   doc["error"] = 0;
+  //   temp_storage = t;
+  //   humid_storage = h;
+  // }
+  // timeClient.update();
+  // int epochDate = timeClient.getEpochTime();
+  // doc["t"] = epochDate;
+  // char buffer[1024];
+  // size_t n = serializeJson(doc, buffer);
+  // mqtt_client.publish(mqtt_data_topic, buffer, n);
+  // mqtt_client.loop();
 
 }
