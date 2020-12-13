@@ -110,7 +110,7 @@ void mqttConnect() {
     if (mqtt_client.connect(mqttClientName, mqttUsername, mqttPassword, willTopic, willQoS, willRetain, willMessage)) {
       Serial.println("Connection Complete");
       Serial.println(willTopic);
-      mqtt_client.publish(willTopic, "online");
+      mqtt_client.publish(willTopic, "online", true);
       // empty out watever command is on the mqtt channel
       mqtt_client.publish(mqtt_command_topic, "");
       // Subcribe here. 
