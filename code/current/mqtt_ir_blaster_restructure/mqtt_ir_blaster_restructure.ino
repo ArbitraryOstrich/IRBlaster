@@ -94,12 +94,10 @@ int mqttLog(const char* str) {
 void mqttConnect() {
   Serial.print("Attempting MQTT connection...");
   char mqtt_log_message[256];
-  long unsigned int mqtt_log_time;
   if (mqtt_client.connect(mqttClientName, mqttUsername, mqttPassword, willTopic, willQoS, willRetain, willMessage)) {
-      mqtt_log_time = timeClient.getEpochTime();
       if (wasConnected == 1){
       // We where connected but lost connection for some reason.
-      sprintf(mqtt_log_message, "Lost Connection to mqtt, attempted %d times to reconnect, new connection made at %d", mqtt_failed_connection_attempts, mqtt_log_time);
+      sprintf(mqtt_log_message, "Lost Connection to mqtt, attempted %d times to reconnect.", mqtt_failed_connection_attempts);
       }else{
       sprintf(mqtt_log_message, "Made first connection.");
       }
@@ -389,7 +387,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
 }
 void loop() {
   delay(50);
-  //~20 Iterations per second
+  //20 Iterations per second
+  //No need to keep running if we fail the mqtt connection
+  //Maybe in future we can store some of our readings
   if (!mqtt_client.connected()) {
    mqttConnect();
   }
