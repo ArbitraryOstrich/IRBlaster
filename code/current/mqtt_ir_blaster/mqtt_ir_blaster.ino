@@ -2,20 +2,16 @@
 #include <PubSubClient.h>
 #include <NTPClient.h>
 #include <Arduino.h>
-#include <IRremoteESP8266.h>
+// #include <IRremoteESP8266.h>
 #include <IRsend.h>
 #include <WiFi.h>
-// #include "DHT.h"
+
 
 #include <Adafruit_BME280.h>
 float temp_storage = 0;
 float humid_storage = 0;
-
 #define SEALEVELPRESSURE_HPA (1013.25)
 Adafruit_BME280 bme;
-
-float temperature, humidity, pressure, altitude;
-
 bool bme_found;
 
 
@@ -36,34 +32,27 @@ int willQoS = 1;
 int willRetain = 1;
 bool wasConnected = 0;
 
-// #define DHTPIN 15
-// #define DHTTYPE DHT22
-// DHT dht(DHTPIN, DHTTYPE);
-// float dht_temp_storage = 0;
-// float dht_humid_storage = 0;
-
 
 char *ssid      = "***REMOVED***";               // Set you WiFi SSID
 char *password  = "***REMOVED***";               // Set you WiFi password
 
-const uint16_t kIrLed = 4;  // ESP8266 GPIO pin to use. Recommended: 4 (D2).
-
-IRsend irsend(kIrLed);  // Set the GPIO to be used to sending the message.
 WiFiClient espClient;
 PubSubClient mqtt_client(espClient);
+
+
+const uint16_t kIrLed = 4;  // ESP8266 GPIO pin to use. Recommended: 4 (D2).
+IRsend irsend(kIrLed);  // Set the GPIO to be used to sending the message.
 
 //captured by IRrecvDumpV2.ino
 const uint16_t shaw_power_raw[27] = {4950,2002,966,1062,942,3016,914,3042,960,1070,940,1064,938,1092,940,1064,938,1092,940,1064,938,3020,964,1066,940,3016,940};
 const uint16_t shaw_guide[27] = {4976,2000,968,1038,938,3018,992,2968,992,2988,944,3014,968,1038,964,1066,942,1060,966,1066,968,1038,962,2996,992,1036,968};
 const uint16_t shaw_last_channel[27] = {4928,2024,942,1062,940,1090,942,1062,940,3018,964,2994,966,1062,942,1064,966,1062,942,1064,966,2988,968,3016,940,3016,940};
 const uint16_t shaw_go_back[27] = {4956,1998,970,1034,962,2996,994,2964,994,1034,970,2988,936,1094,970,1036,938,1092,970,2988,970,2988,970,2988,970,2988,962};
-
 const uint16_t shaw_enter[27] = {4956,1998,968,1036,992,1038,968,2990,968,2988,916,3042,964,1066,970,1034,962,1068,968,1036,962,2996,994,1036,970,1034,994};
 const uint16_t shaw_arrow_down[27] = {4896,2052,938,1092,942,1064,938,1092,942,1062,916,1116,942,3016,942,1062,960,1072,942,1062,940,3018,966,1062,942,3016,942};
 const uint16_t shaw_arrow_up[27] = {4956,1998,968,2990,970,2988,916,1114,970,1034,968,1036,994,2988,968,1036,958,1072,968,2988,996,2962,968,2988,938,3020,990};
-const uint16_t shaw_arrow_left[27] = {4942,2008,964,2994,994,1036,970,2988,968,2988,938,3020,992,1038,968,1036,992,1038,968,2988,970,1036,994,1036,968,1036,994};
-const uint16_t shaw_arrow_right[27] = {4954,1976,994,2962,994,1036,968,1036,996,1034,970,1036,994,1036,996,1010,1000,1030,968,2988,936,3020,966,1066,968,1036,964};
-
+const uint16_t shaw_arrow_left[27] = {4954,1998,970,2986,940,1092,968,2990,996,2960,968,2990,968,1036,994,1036,968,1038,994,2988,968,1036,940,1090,970,1034,938};
+const uint16_t shaw_arrow_right[27] = {5046,1908,1088,2872,1058,948,1082,946,1058,948,1056,972,1088,918,1084,924,1078,950,1056,2900,1000,2958,1078,954,1082,942,1032};
 const uint16_t shaw_1[27] = {4948,2026,942,3016,942,3016,942,3014,940,3018,966,1064,942,1062,964,1066,942,1062,964,1066,942,3014,944,1062,968,1062,942};
 const uint16_t shaw_2[27] = {4956,1998,970,2988,970,1034,994,1038,968,1036,992,2966,994,1034,970,1036,994,1036,968,1036,994,2962,998,2986,970,1034,940};
 const uint16_t shaw_3[27] = {4956,1998,970,1036,960,2998,994,1036,996,1008,992,2966,994,1036,970,1036,994,1034,968,2990,968,2988,964,1068,970,1034,962};
@@ -77,8 +66,6 @@ const uint16_t shaw_0[27] = {4978,1998,968,1036,960,1070,968,2988,970,1034,992,1
 
 
 WiFiUDP ntpUDP;
-// NTPClient timeClient(ntpUDP);
-
 NTPClient timeClient(ntpUDP, "***REMOVED***", 3600, 60000);
 // NTPClient timeClient(ntpUDP, "192.168.138.1", 3600, 60000);
 
@@ -131,12 +118,43 @@ void mqttConnect() {
 }
 
 void start_bme(){
-  Serial.println("Attempting to start BME");
-  bme.begin(0x76);   
+  Serial.println("Attempting to start BME");  
   bme_found = bme.begin(0x76); 
 }
 
+void read_BME(){
+  float h = bme.readHumidity();
+  float t = bme.readTemperature();
+  float p = bme.readPressure() / 100.0F;
 
+  DynamicJsonDocument doc(1024);
+  if (isnan(h) || isnan(t)) {
+    //Use the stored value instead
+    doc["d_t"] = temp_storage;
+    doc["d_h"] = humid_storage;
+    doc["error"] = 1;
+
+  } else {
+    char humidity[15];
+    char temp[15];
+    char pressure[15];
+    sprintf(temp, "%.1f", t);
+    sprintf(humidity, "%.1f", h);
+    doc["d_t"] = temp;
+    doc["d_h"] = humidity;
+    doc["d_p"] = p;
+    doc["error"] = 0;
+    temp_storage = t;
+    humid_storage = h;
+  }
+  timeClient.update();
+  int epochDate = timeClient.getEpochTime();
+  doc["t"] = epochDate;
+  char buffer[1024];
+  size_t n = serializeJson(doc, buffer);
+  mqtt_client.publish(mqtt_data_topic, buffer, n);
+  mqtt_client.loop();
+}
 
 void setup() {
   Serial.begin(115200);
@@ -176,6 +194,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     // Write over doc["n"] later if we actually do something w/ the command.
     doc["n"] = "Received Command but didn't understand";
 
+    // Check if channel is first word of the command
     char buffer[10];
     strncpy(buffer, payload_c_string, 7);
     buffer[7] = '\0';   
@@ -247,6 +266,10 @@ void callback(char* topic, byte* payload, unsigned int length) {
       }
       doc["n"] = chan_buffer;
     }
+
+
+
+
     /// TV Stuff
     if (strcmp((char *) payload_c_string, "sam_power") == 0 ) {
       irsend.sendSAMSUNG(0xE0E040BF, 32);
@@ -321,7 +344,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
       doc["n"] = "shaw_arrow_left";
     }
     if (strcmp((char *) payload_c_string, "shaw_arrow_right") == 0 ) {
-      irsend.sendRaw(shaw_enter, 27, 38);  // Send a raw data capture at 38kHz.
+      irsend.sendRaw(shaw_arrow_right, 27, 38);  // Send a raw data capture at 38kHz.
       doc["n"] = "shaw_arrow_right";
     }
     /////
@@ -379,39 +402,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   mqtt_client.publish(mqtt_response_topic, buffer, n);
 }
 
-void read_BME(){
-  float h = bme.readHumidity();
-  float t = bme.readTemperature();
-  float p = bme.readPressure() / 100.0F;
 
-  DynamicJsonDocument doc(1024);
-  if (isnan(h) || isnan(t)) {
-    //Use the stored value instead
-    doc["d_t"] = temp_storage;
-    doc["d_h"] = humid_storage;
-    doc["error"] = 1;
-
-  } else {
-    char humidity[15];
-    char temp[15];
-    char pressure[15];
-    sprintf(temp, "%.1f", t);
-    sprintf(humidity, "%.1f", h);
-    doc["d_t"] = temp;
-    doc["d_h"] = humidity;
-    doc["d_p"] = p;
-    doc["error"] = 0;
-    temp_storage = t;
-    humid_storage = h;
-  }
-  timeClient.update();
-  int epochDate = timeClient.getEpochTime();
-  doc["t"] = epochDate;
-  char buffer[1024];
-  size_t n = serializeJson(doc, buffer);
-  mqtt_client.publish(mqtt_data_topic, buffer, n);
-  mqtt_client.loop();
-}
 
 int loop_iter; 
 
@@ -421,43 +412,12 @@ void loop() {
    mqttConnect();
   }
   loop_iter = loop_iter + 1;
-  if (loop_iter == 20) {
+  // 2 seconds
+  if (loop_iter == 40) {
     read_BME();
     loop_iter = 0;
   }
   mqtt_client.loop();
 
-
-  // float h = bme.readHumidity();
-  // float t = bme.readTemperature();
-  // float p = bme.readPressure() / 100.0F;
-
-  // DynamicJsonDocument doc(1024);
-  // if (isnan(h) || isnan(t)) {
-  //   //Use the stored value instead
-  //   doc["d_t"] = temp_storage;
-  //   doc["d_h"] = humid_storage;
-  //   doc["error"] = 1;
-
-  // } else {
-  //   char humidity[15];
-  //   char temp[15];
-  //   char pressure[15];
-  //   sprintf(temp, "%.1f", t);
-  //   sprintf(humidity, "%.1f", h);
-  //   doc["d_t"] = temp;
-  //   doc["d_h"] = humidity;
-  //   doc["d_p"] = p;
-  //   doc["error"] = 0;
-  //   temp_storage = t;
-  //   humid_storage = h;
-  // }
-  // timeClient.update();
-  // int epochDate = timeClient.getEpochTime();
-  // doc["t"] = epochDate;
-  // char buffer[1024];
-  // size_t n = serializeJson(doc, buffer);
-  // mqtt_client.publish(mqtt_data_topic, buffer, n);
-  // mqtt_client.loop();
 
 }
