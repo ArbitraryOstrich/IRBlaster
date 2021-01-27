@@ -199,10 +199,12 @@ void callback(char* topic, byte* payload, unsigned int length) {
   doc["msg"] = "Received Command but didn't understand";
 
   if (r_doc["BME_polling"]) {
-    polling_rate = r_doc["set_polling"].as<int>();
-    char mqtt_log_message[64];
-    sprintf(mqtt_log_message, "Setting the polling rate at %d seconds" , polling_rate);
-    doc["msg"] = mqtt_log_message;
+    if (r_doc["BME_polling"].as<int>() != 0){
+      polling_rate = r_doc["BME_polling"].as<int>();
+      char mqtt_log_message[64];
+      sprintf(mqtt_log_message, "Setting the polling rate at %d seconds" , polling_rate);
+      doc["msg"] = mqtt_log_message;
+    }
   }
   if (r_doc["channel"]){
     char chan_buffer[5];
@@ -381,7 +383,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
   char buffer[1024];
   size_t n = serializeJson(doc, buffer);
-  mqtt_client.publish(mqtt_data_topic, buffer, n);
+  mqtt_client.publish(mqtt_log_topic, buffer, n);
   mqtt_client.loop();
 
 }
