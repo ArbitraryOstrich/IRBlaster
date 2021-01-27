@@ -2,32 +2,33 @@
 #include <PubSubClient.h>
 #include <NTPClient.h>
 #include <Arduino.h>
-// #include <IRremoteESP8266.h>
 #include <IRsend.h>
 #include <WiFi.h>
-
-
 #include <Adafruit_BME280.h>
-float temp_storage = 0;
-float humid_storage = 0;
+
+float temp_storage;
+float humid_storage;
+
+
 #define SEALEVELPRESSURE_HPA (1013.25)
 Adafruit_BME280 bme;
 bool bme_found;
 
-
+int polling_rate = 5; // Number of seconds between polling bme280 attempts
+int loop_iter; 
 
 const char* mqttServerIp = "***REMOVED***";
 const short mqttServerPort = 1883;
 const char* mqttUsername = "***REMOVED***";
 const char* mqttPassword = "***REMOVED***";
 const char* mqttClientName = "***REMOVED***";
-
-const char* mqtt_data_topic = "***REMOVED***/dht22";
+const char* mqtt_data_topic = "***REMOVED***/bme280";
 const char* mqtt_command_topic = "***REMOVED***/command";
 const char* mqtt_response_topic = "***REMOVED***/response";
 const char* mqtt_log_topic = "***REMOVED***/log";
 const char *willTopic = "***REMOVED***/status";
 const char *willMessage = "offline";
+int mqtt_failed_connection_attempts;
 int willQoS = 1;
 int willRetain = 1;
 bool wasConnected = 0;
@@ -64,16 +65,15 @@ const uint16_t shaw_8[27] = {4974,2000,942,3014,942,1062,966,1064,942,3016,968,1
 const uint16_t shaw_9[27] = {4974,2000,968,1038,990,2968,994,2988,968,2990,968,1036,962,1068,968,1036,962,1068,968,2990,970,1036,992,1036,968,1036,992};
 const uint16_t shaw_0[27] = {4978,1998,968,1036,960,1070,968,2988,970,1034,992,1038,970,2988,970,1036,1022,1008,970,1036,996,2960,996,2988,970,1036,962};
 
-
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "***REMOVED***", 3600, 60000);
-// NTPClient timeClient(ntpUDP, "192.168.138.1", 3600, 60000);
+
 
 String formattedDate;
 String dayStamp;
 String timeStamp;
 
-void mqttLog(const char* str) {
+int mqttLog(const char* str) {
   if (mqtt_client.connected()){
     DynamicJsonDocument doc(256);
     timeClient.update();
@@ -84,44 +84,57 @@ void mqttLog(const char* str) {
     size_t n = serializeJson(doc, buffer);
     mqtt_client.publish(mqtt_log_topic, buffer, n);
     // mqtt_client.publish(mqtt_log_topic, str);
+    return 1;
   }else{
     // print to serial
     // also figure out a way to store. 
+    return 0;
   }
 }
-
-
 void mqttConnect() {
-  while (!mqtt_client.connected()) {
-    Serial.print("Attempting MQTT connection...");
-    if (mqtt_client.connect(mqttClientName, mqttUsername, mqttPassword, willTopic, willQoS, willRetain, willMessage)) {
-      Serial.println("Connection Complete");
+  Serial.print("Attempting MQTT connection...");
+  char mqtt_log_message[256];
+  if (mqtt_client.connect(mqttClientName, mqttUsername, mqttPassword, willTopic, willQoS, willRetain, willMessage)) {
+      if (wasConnected == 1){
+      // We where connected but lost connection for some reason.
+      sprintf(mqtt_log_message, "Lost Connection to mqtt, attempted %d times to reconnect.", mqtt_failed_connection_attempts);
+      }else{
+      sprintf(mqtt_log_message, "Made first connection.");
+      }
+      mqttLog(mqtt_log_message);
+      mqtt_failed_connection_attempts = 0;
+      mqtt_client.publish(willTopic, "online", true);       
       Serial.println(willTopic);
-      mqtt_client.publish(willTopic, "online", true);
       // empty out watever command is on the mqtt channel
       mqtt_client.publish(mqtt_command_topic, "");
+      // ...
       // Subcribe here. 
       mqtt_client.subscribe(mqtt_command_topic);
-      if (wasConnected){
-        mqttLog("Lost Connection to mqtt but now im back");
-      }else{
-        mqttLog("First Connection after boot");
-      }
-      wasConnected = 1;
-      } else {
+      // ...
+      mqtt_client.loop();
+  }else{
+      mqtt_failed_connection_attempts++;
       Serial.print("failed, rc = ");
       Serial.print(mqtt_client.state());
-      Serial.println("Trying again in 5 seconds");
+      Serial.println("Waiting for 5 seconds before trying again.");
       delay(5000);
-    }
   }
 }
-
-void start_bme(){
+int start_bme(){
   Serial.println("Attempting to start BME");  
   bme_found = bme.begin(0x76); 
+  if (bme_found == 1) {
+      Serial.println("BME Started");
+      Serial.print("Polling every ");
+      int buff = polling_rate;
+      Serial.print(buff);
+      Serial.println(" Seconds");
+      return 1;
+  }else{
+    Serial.println("Starting BME Failed");
+    return 0;
+  }
 }
-
 void read_BME(){
   float h = bme.readHumidity();
   float t = bme.readTemperature();
@@ -155,7 +168,6 @@ void read_BME(){
   mqtt_client.publish(mqtt_data_topic, buffer, n);
   mqtt_client.loop();
 }
-
 void setup() {
   Serial.begin(115200);
   delay(500);
@@ -175,40 +187,30 @@ void setup() {
   Serial.println("WiFi connected:");
   Serial.print(WiFi.localIP());
   start_bme();
-  Serial.println("BME Started");
-  Serial.println("/");
   irsend.begin();
-  // dht.begin();
 	delay(500);
 }
-
 void callback(char* topic, byte* payload, unsigned int length) {
-  payload[length] = '\0';
-  char *payload_c_string = (char *) payload;
-  char *topic_c_string = (char *) topic;
-  DynamicJsonDocument doc(1024);
+  StaticJsonDocument<1024> r_doc;
+  deserializeJson(r_doc, payload, length);
   timeClient.update();
-  int epochDate = timeClient.getEpochTime();
-  doc["t"] = epochDate;
-  if (strcmp((char *) topic_c_string, mqtt_command_topic) == 0 ) {
-    // Write over doc["n"] later if we actually do something w/ the command.
-    doc["n"] = "Received Command but didn't understand";
+  DynamicJsonDocument doc(1024);
+  doc["rx_t"] = timeClient.getEpochTime();
+  doc["msg"] = "Received Command but didn't understand";
 
-    // Check if channel is first word of the command
-    char buffer[10];
-    strncpy(buffer, payload_c_string, 7);
-    buffer[7] = '\0';   
-    Serial.println(payload_c_string);
-    if (strcmp((char *) buffer, "channel") == 0 ) {
-      Serial.println("Received channel change command");
-      char chan_buffer[5];
-      chan_buffer[1] = payload_c_string[8]; 
-      chan_buffer[2] = payload_c_string[9]; 
-      chan_buffer[3] = payload_c_string[10]; 
-      chan_buffer[7] = '\0'; 
-      Serial.println(chan_buffer);
-      for (int i = 1; i < 4; i++){
-        switch(chan_buffer[i]){
+  if (r_doc["BME_polling"]) {
+    if (r_doc["BME_polling"].as<int>() != 0){
+      polling_rate = r_doc["BME_polling"].as<int>();
+      char mqtt_log_message[64];
+      sprintf(mqtt_log_message, "Setting the polling rate at %d seconds" , polling_rate);
+      doc["msg"] = mqtt_log_message;
+    }
+  }
+  if (r_doc["channel"]){
+    char chan_buffer[5];
+    sprintf (chan_buffer, "%i", r_doc["channel"].as<int>());
+    for (int i = 0; i < 3; i++){
+      switch(chan_buffer[i]){
           case '1':
             irsend.sendRaw(shaw_1, 27, 38); 
             delay(100);
@@ -260,162 +262,145 @@ void callback(char* topic, byte* payload, unsigned int length) {
             Serial.println(chan_buffer[i]);
             break;
           default:
-            doc["n"] = "Could not decode number string?";
+            doc["msg"] = "Could not decode number string?";
             break;
-        }
       }
-      doc["n"] = chan_buffer;
     }
-
-
-
-
-    /// TV Stuff
-    if (strcmp((char *) payload_c_string, "sam_power") == 0 ) {
-      irsend.sendSAMSUNG(0xE0E040BF, 32);
-      doc["n"] = "sam_power";
-    }
-    if (strcmp((char *) payload_c_string, "sam_mute") == 0 ) {
-      irsend.sendSAMSUNG(0xE0E0F00F, 32);
-      doc["n"] = "sam_mute";
-    }
-    if (strcmp((char *) payload_c_string, "sam_source") == 0 ) {
-      irsend.sendSAMSUNG(0xE0E0807F,32,2);
-      doc["n"] = "sam_source";
-    }
-    if (strcmp((char *) payload_c_string, "sam_vol_down") == 0 ) {
-      irsend.sendSAMSUNG(0xE0E0D02F,32,2);
-      doc["n"] = "sam_vol_down";
-    }
-    if (strcmp((char *) payload_c_string, "sam_vol_up") == 0 ) {
-      irsend.sendSAMSUNG(0xE0E0E01F,32,2);
-      doc["n"] = "sam_vol_up";
-    }
-    if (strcmp((char *) payload_c_string, "ccast_to_sat") == 0 ) {
-      irsend.sendSAMSUNG(0xE0E0807F,32,2);
-      delay(1000);
-      irsend.sendSAMSUNG(0xE0E0807F,32,2);
-      doc["n"] = "Changing from Ccast To Sat";
-    }
-    /////
-    /////
-    /////
-    ///// Shaw Utili
-    /////
-    /////
-    ///// 
-    if (strcmp((char *) payload_c_string, "shaw_power_raw") == 0 ) {
-      irsend.sendRaw(shaw_power_raw, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_power_raw";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_guide") == 0 ) {
-      irsend.sendRaw(shaw_guide, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "Shaw Guide";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_last_channel") == 0 ) {
-      irsend.sendRaw(shaw_last_channel, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_last_channel";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_go_back") == 0 ) {
-      irsend.sendRaw(shaw_go_back, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_go_back";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_enter") == 0 ) {
-      irsend.sendRaw(shaw_enter, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_enter";
-    }
-    /////
-    /////
-    /////
-    ///// Shaw Arrows
-    /////
-    /////
-    /////
-    if (strcmp((char *) payload_c_string, "shaw_arrow_down") == 0 ) {
-      irsend.sendRaw(shaw_arrow_down, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_arrow_down";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_arrow_up") == 0 ) {
-      irsend.sendRaw(shaw_arrow_up, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_arrow_up";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_arrow_left") == 0 ) {
-      irsend.sendRaw(shaw_arrow_left, 27, 38);  // Send a raw data capture  at 38kHz.
-      doc["n"] = "shaw_arrow_left";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_arrow_right") == 0 ) {
-      irsend.sendRaw(shaw_arrow_right, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_arrow_right";
-    }
-    /////
-    /////
-    /////
-    ///// Shaw Numbers
-    /////
-    /////
-    /////
-    if (strcmp((char *) payload_c_string, "shaw_1") == 0 ) {
-      irsend.sendRaw(shaw_1, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_1";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_2") == 0 ) {
-      irsend.sendRaw(shaw_2, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_2";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_3") == 0 ) {
-      irsend.sendRaw(shaw_3, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_3";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_4") == 0 ) {
-      irsend.sendRaw(shaw_4, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_4";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_5") == 0 ) {
-      irsend.sendRaw(shaw_5, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_5";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_6") == 0 ) {
-      irsend.sendRaw(shaw_6, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_6";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_7") == 0 ) {
-      irsend.sendRaw(shaw_7, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_7";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_8") == 0 ) {
-      irsend.sendRaw(shaw_8, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_8";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_9") == 0 ) {
-      irsend.sendRaw(shaw_9, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_9";
-    }
-    if (strcmp((char *) payload_c_string, "shaw_0") == 0 ) {
-      irsend.sendRaw(shaw_0, 27, 38);  // Send a raw data capture at 38kHz.
-      doc["n"] = "shaw_0";
-    }
-
+    doc["channel"] = chan_buffer;
   }
-  // Prep json
+  if (r_doc["start_bme"]){
+    int return_value = start_bme();
+    if (return_value == 1) {
+      doc["msg"] = "Started BME successfully";
+    }else{
+      doc["msg"] = "Failed to start BME";
+    }
+  }
+  if (r_doc["sam_power"]){
+    irsend.sendSAMSUNG(0xE0E040BF, 32);
+    doc["msg"] = "sam_power";
+  }
+  if (r_doc["sam_mute"])  {
+    irsend.sendSAMSUNG(0xE0E0F00F, 32);
+    doc["msg"] = "sam_mute";
+  }
+  if (r_doc["sam_source"]) {
+    irsend.sendSAMSUNG(0xE0E0807F,32,2);
+    doc["msg"] = "sam_source";
+  }
+  if (r_doc["sam_vol_down"]) {
+    irsend.sendSAMSUNG(0xE0E0D02F,32,2);
+    doc["msg"] = "sam_vol_down";
+  }
+  if (r_doc["sam_vol_up"]) {
+    irsend.sendSAMSUNG(0xE0E0E01F,32,2);
+    doc["msg"] = "sam_vol_up";
+  }
+  if (r_doc["ccast_to_sat"]) {
+    irsend.sendSAMSUNG(0xE0E0807F,32,2);
+    delay(1000);
+    irsend.sendSAMSUNG(0xE0E0807F,32,2);
+    doc["msg"] = "Changing from Ccast To Sat";
+  }
+  ///// Shaw Utility
+  if (r_doc["shaw_power_raw"]) {
+    irsend.sendRaw(shaw_power_raw, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_power_raw";
+  }
+  if (r_doc["shaw_guide"]) {
+    irsend.sendRaw(shaw_guide, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "Shaw Guide";
+  }
+  if (r_doc["shaw_last_channel"]) {
+    irsend.sendRaw(shaw_last_channel, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_last_channel";
+  }
+  if (r_doc["shaw_go_back"]) {
+    irsend.sendRaw(shaw_go_back, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_go_back";
+  }
+  if (r_doc["shaw_enter"]) {
+    irsend.sendRaw(shaw_enter, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_enter";
+  }
+  ///// Shaw Arrows
+  if (r_doc["shaw_arrow_down"]) {
+    irsend.sendRaw(shaw_arrow_down, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_arrow_down";
+  }
+  if (r_doc["shaw_arrow_up"]) {
+    irsend.sendRaw(shaw_arrow_up, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_arrow_up";
+  }
+  if (r_doc["shaw_arrow_left"]) {
+    irsend.sendRaw(shaw_arrow_left, 27, 38);  // Send a raw data capture  at 38kHz.
+    doc["msg"] = "shaw_arrow_left";
+  }
+  if (r_doc["shaw_arrow_right"]) {
+    irsend.sendRaw(shaw_arrow_right, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_arrow_right";
+  }
+  ///// Shaw Numbers
+  if (r_doc["shaw_1"]) {
+    irsend.sendRaw(shaw_1, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_1";
+  }
+  if (r_doc["shaw_2"]) {
+    irsend.sendRaw(shaw_2, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_2";
+  }
+  if (r_doc["shaw_3"]) {
+    irsend.sendRaw(shaw_3, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_3";
+  }
+  if (r_doc["shaw_4"]) {
+    irsend.sendRaw(shaw_4, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_4";
+  }
+  if (r_doc["shaw_5"]) {
+    irsend.sendRaw(shaw_5, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_5";
+  }
+  if (r_doc["shaw_6"]) {
+    irsend.sendRaw(shaw_6, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_6";
+  }
+  if (r_doc["shaw_7"]) {
+    irsend.sendRaw(shaw_7, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_7";
+  }
+  if (r_doc["shaw_8"]) {
+    irsend.sendRaw(shaw_8, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_8";
+  }
+  if (r_doc["shaw_9"]) {
+    irsend.sendRaw(shaw_9, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_9";
+  }
+  if (r_doc["shaw_0"]) {
+    irsend.sendRaw(shaw_0, 27, 38);  // Send a raw data capture at 38kHz.
+    doc["msg"] = "shaw_0";
+  }
   char buffer[1024];
   size_t n = serializeJson(doc, buffer);
-  mqtt_client.publish(mqtt_response_topic, buffer, n);
+  mqtt_client.publish(mqtt_log_topic, buffer, n);
+  mqtt_client.loop();
+
 }
-
-
-
-int loop_iter; 
-
 void loop() {
   delay(50);
+  //20 Iterations per second
+  //No need to keep running if we fail the mqtt connection
+  //Maybe in future we can store some of our readings
   if (!mqtt_client.connected()) {
    mqttConnect();
   }
   loop_iter = loop_iter + 1;
-  // 2 seconds
-  if (loop_iter == 40) {
-    read_BME();
-    loop_iter = 0;
+  if (bme_found == 1) {
+    if (loop_iter == (polling_rate * 20)) {
+      read_BME();
+      loop_iter = 0;   
+    }
   }
   mqtt_client.loop();
 
