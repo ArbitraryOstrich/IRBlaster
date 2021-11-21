@@ -24,7 +24,7 @@ const char* mqttPassword = "***REMOVED***";
 const char* mqttClientName = "***REMOVED***";
 const char* mqtt_data_topic = "***REMOVED***/bme280";
 const char* mqtt_command_topic = "***REMOVED***/command";
-const char* mqtt_response_topic = "***REMOVED***/response";
+// const char* mqtt_response_topic = "***REMOVED***/response";
 const char* mqtt_log_topic = "***REMOVED***/log";
 const char *willTopic = "***REMOVED***/status";
 const char *willMessage = "offline";
@@ -67,11 +67,6 @@ const uint16_t shaw_0[27] = {4978,1998,968,1036,960,1070,968,2988,970,1034,992,1
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "***REMOVED***", 3600, 60000);
-
-
-String formattedDate;
-String dayStamp;
-String timeStamp;
 
 int mqttLog(const char* str) {
   if (mqtt_client.connected()){
@@ -266,7 +261,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
             break;
       }
     }
-    doc["channel"] = chan_buffer;
+    doc["msg"] = chan_buffer;
   }
   if (r_doc["start_bme"]){
     int return_value = start_bme();
@@ -298,9 +293,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
   if (r_doc["ccast_to_sat"]) {
     irsend.sendSAMSUNG(0xE0E0807F,32,2);
-    delay(1000);
-    irsend.sendSAMSUNG(0xE0E0807F,32,2);
-    doc["msg"] = "Changing from Ccast To Sat";
+    doc["msg"] = "Samsung Source";
   }
   ///// Shaw Utility
   if (r_doc["shaw_power_raw"]) {
