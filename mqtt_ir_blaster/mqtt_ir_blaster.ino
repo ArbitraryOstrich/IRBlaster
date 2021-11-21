@@ -8,8 +8,6 @@
 #include "config.h"
 #include "ir_commands.h"
 
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "192.168.138.171", 3600, 60000);
 
 int mqttLog(const char* str) {
   if (mqtt_client.connected()){
