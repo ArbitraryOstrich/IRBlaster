@@ -1,9 +1,5 @@
 ## Basic idea outline
-Setup a IR transmitter and linked it up with mqtt. Figured out and saved main functions for TV and satellite, leaned heavily on [this code by crankyoldgit][crankyoldgitIRremoteESP8266] to build out my less cool but more specific version. Specifically take a look at [examples/IRMQTTServer], it's advanced code but fairly useful. Also included a DHT22 to match with the fireplace temps and get a good idea of how the fireplace effects living room temps.
-
-## Ongoing notes
- - Nov 19 2020
-   - Im seeing a sawtooth noise on the graph that happens over hours when there is not much actual change in temp or humidity. This may be something to do with the soldering job i did and some cross talk going on.  
+Setup a IR transmitter and linked it up with mqtt. Figured out and saved main functions for TV and satellite, leaned heavily on [this code by crankyoldgit][crankyoldgitIRremoteESP8266] to build out my less cool but more specific version. Take a look at IRMQTTServer, it's advanced code but fairly useful. Also included a DHT22 to match with the fireplace temps and get a good idea of how the fireplace effects living room temps.
 
 ### Build
 - **VS1838B Infrared receiver**
