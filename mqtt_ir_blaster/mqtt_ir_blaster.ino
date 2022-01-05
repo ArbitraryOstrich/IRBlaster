@@ -1,13 +1,30 @@
-#include <ArduinoJson.h>
-#include <PubSubClient.h>
-#include <NTPClient.h>
-#include <Arduino.h>
-#include <IRsend.h>
 #include <WiFi.h>
+#include <Arduino.h>
+
+#include <ArduinoJson.h>
+//https://arduinojson.org/
+//6.18.4
+#include <PubSubClient.h>
+//https://pubsubclient.knolleary.net/
+//V 2.8.0
+#include <NTPClient.h>
+// https://github.com/arduino-libraries/NTPClient
+// v 3.2.0
+#include "uptime.h"
+//https://github.com/YiannisBourkelis/Uptime-Library
+// V 1.0.0
+#include <IRsend.h>
+// Search for IRremoteESP8266
+// https://github.com/crankyoldgit/IRremoteESP8266
+// V 2.8.1
 #include <Adafruit_BME280.h>
+// https://github.com/adafruit/Adafruit_BME280_Library
+// V 2.2.2
+
+
 #include "config.h"
 #include "ir_commands.h"
-
+#include "version.h"
 
 int mqttLog(const char* str) {
   if (mqtt_client.connected()){
@@ -56,6 +73,32 @@ void mqttConnect() {
       delay(5000);
   }
 }
+void send_info(){
+  if (currentMillis - last_info_Millis >= send_info_rate){
+    last_info_Millis = currentMillis;
+    timeClient.update();
+    int epochDate = timeClient.getEpochTime();
+    DynamicJsonDocument doc(512);
+    doc["t"] = epochDate; //1+10
+    doc["Wifi IP"] = ip_char; //7+16
+    doc["Hostname"] = wifiHostname; //9+??
+    doc["Code Version"] = _VERSION; //12+21
+    doc["polling_rate"] = polling_rate/1000; //12+8 1000 days is 8 digits in seconds
+    doc["info_rate"] = send_info_rate/1000; //9+8
+    uptime::calculateUptime();
+    char readable_time[12];
+    sprintf(readable_time, "%02d:%02d:%02d:%02d", uptime::getDays(),uptime::getHours(),uptime::getMinutes(),uptime::getSeconds());
+    doc["Uptime"] = readable_time; //6+12
+    //155
+    char buffer[256];
+    size_t n = serializeJson(doc, buffer);
+    mqtt_client.publish(mqtt_info_topic, buffer, n);
+    mqtt_client.loop();
+  }
+}
+
+
+
 int start_bme(){
   Serial.println("Attempting to start BME");
   bme_found = bme.begin(0x76);
@@ -72,37 +115,41 @@ int start_bme(){
   }
 }
 void read_BME(){
-  float h = bme.readHumidity();
-  float t = bme.readTemperature();
-  float p = bme.readPressure() / 100.0F;
+  if (currentMillis - last_poll_Millis >= polling_rate ) {
+    last_poll_Millis = currentMillis;
 
-  DynamicJsonDocument doc(1024);
-  if (isnan(h) || isnan(t)) {
-    //Use the stored value instead
-    doc["d_t"] = temp_storage;
-    doc["d_h"] = humid_storage;
-    doc["error"] = 1;
+    float h = bme.readHumidity();
+    float t = bme.readTemperature();
+    float p = bme.readPressure() / 100.0F;
 
-  } else {
-    char humidity[15];
-    char temp[15];
-    char pressure[15];
-    sprintf(temp, "%.1f", t);
-    sprintf(humidity, "%.1f", h);
-    doc["d_t"] = temp;
-    doc["d_h"] = humidity;
-    doc["d_p"] = p;
-    doc["error"] = 0;
-    temp_storage = t;
-    humid_storage = h;
+    DynamicJsonDocument doc(1024);
+    if (isnan(h) || isnan(t)) {
+      //Use the stored value instead
+      doc["d_t"] = temp_storage;
+      doc["d_h"] = humid_storage;
+      doc["error"] = 1;
+
+    } else {
+      char humidity[15];
+      char temp[15];
+      char pressure[15];
+      sprintf(temp, "%.1f", t);
+      sprintf(humidity, "%.1f", h);
+      doc["d_t"] = temp;
+      doc["d_h"] = humidity;
+      doc["d_p"] = p;
+      doc["error"] = 0;
+      temp_storage = t;
+      humid_storage = h;
+    }
+    timeClient.update();
+    int epochDate = timeClient.getEpochTime();
+    doc["t"] = epochDate;
+    char buffer[1024];
+    size_t n = serializeJson(doc, buffer);
+    mqtt_client.publish(mqtt_data_topic, buffer, n);
+    mqtt_client.loop();
   }
-  timeClient.update();
-  int epochDate = timeClient.getEpochTime();
-  doc["t"] = epochDate;
-  char buffer[1024];
-  size_t n = serializeJson(doc, buffer);
-  mqtt_client.publish(mqtt_data_topic, buffer, n);
-  mqtt_client.loop();
 }
 void setup() {
   Serial.begin(115200);
@@ -117,6 +164,13 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("Connected!");
+  WiFi.setHostname(wifiHostname); //define hostname
+  // Generate some info once for info topic
+  IPAddress ip = WiFi.localIP();
+  Serial.print(ip);
+  Serial.println("/");
+  sprintf(ip_char, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+
   mqtt_client.setServer(mqttServerIp, mqttServerPort);
   mqtt_client.setCallback(callback);
   timeClient.begin();
@@ -126,6 +180,8 @@ void setup() {
   irsend.begin();
 	delay(500);
 }
+
+
 void callback(char* topic, byte* payload, unsigned int length) {
   StaticJsonDocument<1024> r_doc;
   deserializeJson(r_doc, payload, length);
@@ -134,11 +190,28 @@ void callback(char* topic, byte* payload, unsigned int length) {
   doc["rx_t"] = timeClient.getEpochTime();
   doc["msg"] = "Received Command but didn't understand";
 
-  if (r_doc["BME_polling"]) {
-    if (r_doc["BME_polling"].as<int>() != 0){
-      polling_rate = r_doc["BME_polling"].as<int>();
+  // if (r_doc["BME_polling"]) {
+  //   if (r_doc["BME_polling"].as<int>() != 0){
+  //     polling_rate = r_doc["BME_polling"].as<int>();
+  //     char mqtt_log_message[64];
+  //     sprintf(mqtt_log_message, "Setting the polling rate at %d seconds" , polling_rate);
+  //     doc["msg"] = mqtt_log_message;
+  //   }
+  // }
+
+  if (r_doc["set_polling"]){
+    polling_rate = r_doc["set_polling"].as<int>()*1000;
+    char mqtt_log_message[64];
+    sprintf(mqtt_log_message, "Setting the polling rate at %d seconds" , polling_rate/1000);
+    doc["msg"] = mqtt_log_message;
+  }
+
+  if (r_doc["set_info"]) {
+    // Validate Input as int
+    if (r_doc["set_info"].as<int>() != 0){
+      send_info_rate = r_doc["set_info"].as<int>()*1000;
       char mqtt_log_message[64];
-      sprintf(mqtt_log_message, "Setting the polling rate at %d seconds" , polling_rate);
+      sprintf(mqtt_log_message, "Setting the info send rate at %d seconds" , send_info_rate/1000); //38+10
       doc["msg"] = mqtt_log_message;
     }
   }
@@ -322,20 +395,24 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
 }
 void loop() {
-  delay(50);
-  //20 Iterations per second
   //No need to keep running if we fail the mqtt connection
   //Maybe in future we can store some of our readings
   if (!mqtt_client.connected()) {
    mqttConnect();
   }
-  loop_iter = loop_iter + 1;
+  currentMillis = millis();
   if (bme_found == 1) {
-    if (loop_iter == (polling_rate * 20)) {
-      read_BME();
-      loop_iter = 0;
-    }
+    read_BME();
   }
+  send_info();
+
+  // loop_iter = loop_iter + 1;
+  // if (bme_found == 1) {
+  //   if (loop_iter == (polling_rate * 20)) {
+  //     read_BME();
+  //     loop_iter = 0;
+  //   }
+  // }
   mqtt_client.loop();
 
 
